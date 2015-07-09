@@ -1,15 +1,20 @@
 package main
 
 import (
-	"errors"
 	"net"
-	"time"
 )
 
-type ICPConn struct {
-	udp     net.UDPConn
+type ICPConn interface {
+	HasMessages() bool
+	GetNextMessage() (Message, error)
+	SendMessage(Message) error
+	ReadByte() (byte, *net.UDPAddr, error)
+	WriteByte(byte, *net.UDPAddr) error
+}
+
+type icpConn struct {
+	udp     *net.UDPConn
 	addr    *net.UDPAddr
-	buf     []byte
 	sendSeq byte
 	recvSeq byte
 }
@@ -18,44 +23,43 @@ func seqMoreRecent(a, b, max byte) bool {
 	return (a > b) && (a-b <= max/2) || (b > a) && (b-a > max/2)
 }
 
-func InitICP(udp net.UDPConn) *ICPConn {
-	return &ICPConn{udp, nil, make([]byte, 20), 0, 0}
+func MakeICP(udp *net.UDPConn) ICPConn {
+	return &icpConn{udp, nil, 0, 0}
 }
 
-func (this *ICPConn) Read() ([]byte, error) {
-	buf := make([]byte, 128)
-	_, addr, err := this.udp.ReadFromUDP(buf)
-	this.addr = addr
-	return buf, err
+func (this *icpConn) HasMessages() bool {
+	return false
 }
 
-func (this *ICPConn) Write(b []byte) (int, error) {
-	if this.addr == nil {
-		return -1, errors.New("Need to receive a packet before you can send one")
+func (this *icpConn) GetNextMessage() (msg Message, err error) {
+	return nil, nil
+}
+
+func (this *icpConn) SendMessage(Message) error {
+	return nil
+}
+
+func (this *icpConn) ReadByte() (byte, *net.UDPAddr, error) {
+	buf := make([]byte, 1)
+	n, addr, err := this.udp.ReadFromUDP(buf)
+
+	if err != nil {
+		return 0, nil, err
 	}
-	return this.udp.WriteToUDP(b, this.addr)
+	if n != 1 {
+		panic("oh gosh n != 1")
+	}
+
+	return buf[0], addr, nil
 }
 
-func (this *ICPConn) Close() {
-	this.udp.Close()
-}
-
-func (this *ICPConn) LocalAddr() net.Addr {
-	return this.udp.LocalAddr()
-}
-
-func (this *ICPConn) RemoteAddr() net.Addr {
-	return this.udp.RemoteAddr()
-}
-
-func (this *ICPConn) SetDeadline(t time.Time) error {
-	return this.udp.SetDeadline(t)
-}
-
-func (this *ICPConn) SetReadDeadline(t time.Time) error {
-	return this.udp.SetReadDeadline(t)
-}
-
-func (this *ICPConn) SetWriteDeadline(t time.Time) error {
-	return this.udp.SetWriteDeadline(t)
+func (this *icpConn) WriteByte(b byte, addr *net.UDPAddr) error {
+	n, oobn, err := this.udp.WriteMsgUDP([]byte{b}, nil, addr)
+	if err != nil {
+		return err
+	}
+	if n != 1 || oobn != 0 {
+		panic("sent the wrong number of bytes???")
+	}
+	return nil
 }

@@ -1,50 +1,82 @@
 package main
 
 import (
-	"net"
+	"container/list"
+	"fmt"
 )
 
 type Client struct {
-	conn        net.Conn
-	server      *Server
-	listeners   []func([]byte)
-	seqId       int32
-	remoteSeqId int32
+	icpConn  ICPConn
+	services *list.List
+	messages map[ServiceType][]Message
 }
 
-func newClient(conn net.Conn, server *Server) {
-	c := Client{conn, server, make([]func([]byte), 0), 0, 0}
-
-	c.handshake()
-
-	c.loop()
-}
-
-func (c Client) handshake() {
-	// nothing for now??
-	//c.Send(consts.SERVER_HI)
-	//c.expect(consts.CLIENT_HI)
-}
-
-func (c Client) loop() {
-	for {
-
-	}
-}
-
-func (c Client) Send(b []byte) {
-	c.conn.Write(b)
-}
-
-func (c Client) expect(b byte) {
-	buf := make([]byte, 1)
-	_, err := c.conn.Read(buf)
-
+func newClient(icp ICPConn) *Client {
+	fmt.Println("Getting byte")
+	byt, addr, err := icp.ReadByte()
 	if err != nil {
 		panic(err)
 	}
 
-	if buf[0] != b {
-		panic("Bad handshake")
+	if byt != CLIENT_HI {
+		panic("Invalid client hello")
+	}
+
+	fmt.Println("Sending byte!!")
+	err = icp.WriteByte(SERVER_HI, addr)
+	if err != nil {
+		panic(err)
+	}
+
+	return &Client{icp, list.New(), make(map[ServiceType][]Message)}
+}
+
+func (c *Client) AddService(s Service) {
+	c.services.PushBack(s)
+}
+
+func (c *Client) getMessagesForService(s Service) []Message {
+	typ := s.GetServiceType()
+	msgs := c.messages[typ]
+	delete(c.messages, typ)
+	return msgs
+}
+
+func (c *Client) handshake() bool {
+	// nothing for now??
+	return true
+}
+
+func (c *Client) Start() {
+	c.loop()
+}
+
+func (c *Client) readMessages() {
+	for c.icpConn.HasMessages() {
+		msg, err := c.icpConn.GetNextMessage()
+
+		if err != nil {
+			// TODO: log error
+			continue
+		}
+
+		if buf, ok := c.messages[msg.GetServiceType()]; ok {
+			buf = append(buf, msg)
+		} else {
+			c.messages[msg.GetServiceType()] = []Message{msg}
+		}
+	}
+}
+
+func (c *Client) loop() {
+	for {
+		c.readMessages()
+
+		for e := c.services.Front(); e != nil; e = e.Next() {
+			s := e.Value.(Service)
+			if s.ProcessMessages(c, c.getMessagesForService(s)) {
+				c.services.Remove(e)
+			}
+		}
 	}
 }
